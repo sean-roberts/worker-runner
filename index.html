@@ -9,7 +9,7 @@
   
   <div style="height: 10000px; width: 10px;" ></div>
   
-
+  <!-- This is what is ran within the worker environment - could also be from a script file location -->
   <script id="push-to-thread" type="plain/text">
     
     console.log(window)
@@ -83,7 +83,6 @@
     worker.postMessage({
       blockingAsyncAccessorArrayBuffer
     });
-
 
     worker.postMessage({
       command: 'init',
