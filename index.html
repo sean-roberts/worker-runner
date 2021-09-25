@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Worker Experiments</title>
+</head>
+<body>
+  
+  <div style="height: 10000px; width: 10px;" ></div>
+  
+
+  <script id="push-to-thread" type="plain/text">
+    
+    console.log(window)
+    
+    console.assert(window === this);
+    //console.assert(window === globalThis, 'globalThis is window');
+    //console.assert(window === self, 'self is window');
+
+    hoistedVar = true;
+    console.assert(hoistedVar === true);
+    (function(){ 
+      hoistedVar = false; 
+    })();
+    console.assert(hoistedVar === false);
+
+    console.log(hoistedVar, window.hoistedVar, this.hoistedVar)
+    console.assert(window.hoistedVar === false, 'variables are hoisted to window');
+
+
+    console.log(location.href);
+    console.log(window.location.href);
+    console.log(window.location.origin);
+
+    let hashVal = Date.now();
+    location.hash = hashVal
+    console.assert(window.location.hash === `#${hashVal}`, 'hash val should match', window.location.hash, hashVal);
+
+
+    console.log(window.screenY);
+    console.log(document.cookie);
+
+    document.cookie = `cookie1=${Date.now()}; expires=Sun, 1 Jan 2023 00:00:00 UTC; path=/`;
+    console.log(document.cookie);
+
+    // should show up in the global space
+    window.someGlobal = true;
+
+  </script>
+
+  <script>
+    const worker = new Worker('worker-exec.js');
+
+    worker.postMessage({
+      workerConfig: { debug: true }
+    });
+
+    const INDEX_SET_FLAG = 0;
+    const INDEX_CONTENT_TYPE = 1;
+    const INDEX_CONTENT_SIZE = 2;
+    const INDEX_CONTENT_START = 3;
+
+    const CONTENT_TYPE_UNKNOWN = 1;
+    const CONTENT_TYPE_NUMBER = 1;
+    const CONTENT_TYPE_BOOLEAN = 2;
+    const CONTENT_TYPE_STRING = 3;
+    const CONTENT_TYPE_JSON = 4;
+    const CONTENT_TYPE_UNDEFINED = 5;
+    const CONTENT_TYPE_NULL = 6;
+    const CONTENT_TYPE_NAN = 7;
+    
+    const ACCESSOR_TYPE_GET = 'get';
+    const ACCESSOR_TYPE_SET = 'set';
+
+    // length is arbitrarly big but seemed big enough for the use-case as I know it now
+    const blockingAsyncAccessorArrayBuffer = new SharedArrayBuffer(2048);
+    const blockingAsyncAccessorArray = new Int32Array(blockingAsyncAccessorArrayBuffer);
+
+    // default val
+    blockingAsyncAccessorArray[INDEX_SET_FLAG] = 0;
+
+    worker.postMessage({
+      blockingAsyncAccessorArrayBuffer
+    });
+
+
+    worker.postMessage({
+      command: 'init',
+      commandOptions: {
+        // pass what file or group of logic to execute
+        inlineScript: document.getElementById('push-to-thread').innerText
+      }
+    });
+
+    worker.addEventListener('message', function (e) {
+      if (e.data && e.data.mainThreadAccessor) {
+        handleMainThreadAccessor(e.data);
+      }
+    }, false);
+
+
+    let accessorCount = 0;
+    function handleMainThreadAccessor({ accessor }) {
+      // console.log('handleMainThreadAccessor', accessor)
+      let accessorResponse = undefined;
+      try {
+        const objectFieldGroups = accessor.api.split('.');
+        
+        let bufferField;
+
+        accessorResponse = objectFieldGroups.reduce((currentRef, fieldName, index, array) => {
+          
+          if(index === array.length - 1 && accessor.type === ACCESSOR_TYPE_SET){
+            return currentRef[fieldName] = accessor.value;
+          }
+          
+          return currentRef[fieldName];
+        }, window);
+
+      } catch (e) {
+        console.error(e)
+      }
+      
+      // TODO: support other content types
+      let contentType;
+      let contentSize;
+      if(accessorResponse){
+        switch(typeof accessorResponse) {
+          case 'string':
+            contentType = CONTENT_TYPE_STRING;
+            contentSize = accessorResponse.length;
+            for (var i = 0, strLen = accessorResponse.length; i < strLen; i++) {
+              Atomics.store(blockingAsyncAccessorArray, i + INDEX_CONTENT_START, accessorResponse.charCodeAt(i));
+            }
+            break;
+          case 'number':
+            contentType = CONTENT_TYPE_NUMBER;
+            contentSize = 1;
+            // TODO: handle floats and big ints
+            Atomics.store(blockingAsyncAccessorArray, INDEX_CONTENT_START, accessorResponse);
+            break;
+          default:
+            console.log('content type is not supported', typeof accessorResponse, accessorResponse)
+            contentType = CONTENT_TYPE_UNKNOWN;
+        }
+      }
+
+      // console.log(contentType, contentSize, accessorResponse, accessor)
+
+      Atomics.store(blockingAsyncAccessorArray, INDEX_CONTENT_TYPE, contentType);
+      Atomics.store(blockingAsyncAccessorArray, INDEX_CONTENT_SIZE, contentSize);
+      Atomics.store(blockingAsyncAccessorArray, INDEX_SET_FLAG, ++accessorCount);
+
+      Atomics.notify(blockingAsyncAccessorArray, INDEX_SET_FLAG, 1)
+    }
+
+
+    // let globals = ()=> JSON.stringify({ window: { scrollY: window.scrollY } })
+    // let firstPass = globals();
+    // // Creating a data structure on top of that shared memory area
+    // // const sharedBuffer = new SharedArrayBuffer(Uint16Array.BYTES_PER_ELEMENT * length * 2)
+    // const sharedBuffer = new SharedArrayBuffer(firstPass.length * 2)
+    // var sharedArray = new Uint16Array(sharedBuffer);
+
+    // function str2ab(str) {
+      
+    //   for (var i = 0, strLen = str.length; i < strLen; i++) {
+    //     Atomics.store(sharedArray, i, str.charCodeAt(i));
+    //   }
+    //   return sharedBuffer;
+    // }
+
+    // str2ab(firstPass);
+
+    // // Send memory area to our worker
+    // // worker.postMessage(sharedBuffer);
+    // const waitBuffer = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 1)
+
+    // const waitArray = new Int32Array(waitBuffer);
+    // Atomics.store(waitArray, 0, 8);
+    // worker.postMessage(waitBuffer)
+
+    // setInterval(function () {
+    //   const nextPass = globals();
+    //   // console.log('[MASTER] Change triggered.', nextPass, window.scrollY)
+    //   str2ab(nextPass);
+    
+
+    //   // Atomics.store(sharedArray, 0, 1337)
+
+      
+
+    //   // This call wakes up the first agent in the queue (FIFO) that is 
+    //   // waiting on the value at index 0 of `sharedArray`
+    //   // Atomics.wake(sharedArray, 0, 1)
+    // }, 1000)
+
+
+  </script>
+</body>
+</html>

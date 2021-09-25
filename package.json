@@ -1,0 +1,23 @@
+{
+  "name": "worker-runner",
+  "version": "1.0.0",
+  "description": "To solve:",
+  "main": "worker-sharedarraybuffer.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "serve -p 3000"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sean-roberts/worker-runner.git"
+  },
+  "author": "Sean Roberts",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sean-roberts/worker-runner/issues"
+  },
+  "homepage": "https://github.com/sean-roberts/worker-runner#readme",
+  "dependencies": {
+    "serve": "^12.0.1"
+  }
+}
